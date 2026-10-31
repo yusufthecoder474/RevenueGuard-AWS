@@ -2,262 +2,226 @@
 
 A serverless financial claim validation API built with **AWS Lambda, Node.js 24, GitHub Actions, and Amazon CloudWatch**.
 
-RevenueGuard AWS validates submitted financial claims against synthetic, hard-coded transactions using exact integer-cent arithmetic, automated security tests, and authenticated HTTPS requests.
+RevenueGuard AWS checks submitted financial claims against **synthetic, hard-coded transactions**, using exact integer-cent arithmetic, automated regression tests, and IAM-authenticated HTTPS requests.
 
-**Project status:** Deployed and tested on AWS Lambda.
+**Project status:** Deployed and verified on AWS Lambda (`ap-southeast-2`).
 
-> **Disclaimer:** This is a portfolio learning project using synthetic financial data. It is not a production financial service.
+> **Disclaimer:** This is a portfolio learning project, not a production financial service. It does not process real customer transactions.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    A[Client / AWS SDK] -->|SigV4 signed HTTPS POST| B[AWS Lambda Function URL]
-    B -->|AWS_IAM authentication| C[Node.js 24 Lambda handler]
-    C --> D[Request and security validation]
+    A[Client / AWS SDK] -->|SigV4 signed HTTPS POST| B[Lambda Function URL]
+    B -->|AWS_IAM authorization| C[Node.js 24 Lambda handler]
+    C --> D[HTTP and input validation]
     D --> E[BigInt integer-cent calculations]
-    E --> F[Per-claim validation results]
+    E --> F[Per-claim verdicts]
     F --> G[JSON response]
-    C --> H[Amazon CloudWatch Logs]
+    C --> H[CloudWatch Logs and Metrics]
 ```
 
-### Request processing
-
-1. The client submits financial claims through an authenticated Lambda Function URL or a direct Lambda invocation.
-2. The handler validates the request method, JSON body, payload size, and claim structure.
-3. Financial amounts are processed using integer cents with `BigInt`.
-4. Submitted claims are compared against trusted totals derived from synthetic transactions.
-5. The API returns an `ACCEPTED` or `REJECTED` verdict.
-6. AWS Lambda automatically publishes execution metrics and logs to Amazon CloudWatch.
+**Request flow:** The caller signs an HTTPS POST with AWS Signature Version 4, or invokes Lambda directly using an authorized AWS SDK. The handler checks the request boundary, parses JSON, validates 1–20 claims, compares values with synthetic trusted totals, and returns `ACCEPTED` or `REJECTED` results. Lambda also publishes execution logs and metrics to CloudWatch.
 
 ## Features
 
-- Serverless API using AWS Lambda and Node.js 24.
-- AWS IAM-authenticated HTTPS Function URL.
-- Exact financial calculations using `BigInt`.
-- Validation of 1–20 financial claims per request.
-- Detection of duplicate claims, unsupported identifiers, malformed amounts, and mismatched values.
-- HTTP method restrictions with POST-only access.
-- Request body size limit of 16 KB.
-- Strict Base64 and UTF-8 request handling.
-- Automated local regression and security testing.
-- GitHub Actions CI and Lambda deployment artifact packaging.
-- Basic AWS CloudWatch monitoring and execution logs.
+- AWS Lambda handler running Node.js 24.
+- AWS IAM-authenticated Lambda Function URL; no publicly unauthenticated endpoint is required.
+- Exact financial calculations using `BigInt` integer cents instead of floating-point arithmetic.
+- Validation of 1–20 claims per request, with duplicate and unsupported fact detection.
+- Rejection of malformed decimal values, incorrect totals, and missing fact identifiers.
+- POST-only HTTP handling; unsupported methods return HTTP 405.
+- HTTP request-body limit of 16 KiB, with Base64 and UTF-8 validation.
+- Credential-free GitHub Actions testing and downloadable Lambda ZIP packaging.
+- Basic CloudWatch runtime metrics and invocation logs.
 
-## Financial validation logic
-
-The application uses three synthetic financial transactions:
+## Synthetic financial dataset
 
 | Transaction | Type | Amount |
 |---|---|---:|
-| INV-101 | Sale | 500.00 |
-| INV-102 | Sale | 750.00 |
-| REF-103 | Refund | 125.00 |
+| `INV-101` | Sale | 500.00 |
+| `INV-102` | Sale | 750.00 |
+| `REF-103` | Refund | 125.00 |
 
-### Derived financial totals
+Derived totals:
 
-| Metric | Amount |
+| Claim `fact_id` | Trusted value |
 |---|---:|
-| Gross sales | 1250.00 |
-| Refunds | 125.00 |
-| Net sales | 1125.00 |
+| `gross_sales` | `1250.00` |
+| `refunds` | `125.00` |
+| `net_sales` | `1125.00` |
 
-All calculations use integer cents to avoid floating-point precision problems.
+Amounts must be supplied as decimal **strings**, not JSON numbers.
 
-## API behavior
+## API example
 
-| Scenario | HTTP status | Result |
-|---|---|---|
-| Valid financial claims | 200 | ACCEPTED |
-| Incorrect financial claim | 200 | REJECTED |
-| Unsupported HTTP method | 405 | REJECTED |
-| Malformed JSON | 400 | REJECTED |
-| Invalid request structure | 400 | REJECTED |
-| Oversized HTTP request | 413 | REJECTED |
+### Valid request body
 
-Business-rule rejection is distinct from HTTP request failure. A well-formed request containing an incorrect financial claim can return HTTP 200 with a `REJECTED` verdict.
+```json
+{
+  "claims": [
+    { "fact_id": "gross_sales", "value": "1250.00" },
+    { "fact_id": "refunds", "value": "125.00" },
+    { "fact_id": "net_sales", "value": "1125.00" }
+  ]
+}
+```
+
+### Expected successful response body
+
+```json
+{
+  "status": "ACCEPTED",
+  "dataset": "synthetic-demo-v1",
+  "checks": [
+    { "fact_id": "gross_sales", "verdict": "ACCEPTED", "reason": "Matches trusted source calculation" },
+    { "fact_id": "refunds", "verdict": "ACCEPTED", "reason": "Matches trusted source calculation" },
+    { "fact_id": "net_sales", "verdict": "ACCEPTED", "reason": "Matches trusted source calculation" }
+  ]
+}
+```
+
+### HTTP and business-rule behavior
+
+| Scenario | HTTP status | Application verdict |
+|---|---:|---|
+| Valid financial claims | 200 | `ACCEPTED` |
+| Incorrect financial claim | 200 | `REJECTED` |
+| Unsupported HTTP method | 405 | `REJECTED` |
+| Malformed JSON | 400 | `REJECTED` |
+| Missing or invalid claim list | 400 | `REJECTED` |
+| Oversized HTTP body | 413 | `REJECTED` |
+
+**Important:** A syntactically valid request containing an incorrect amount returns HTTP 200 with a business-level `REJECTED` verdict. The API does not equate a business-rule rejection with a transport error.
 
 ## Run locally
 
-### Requirements
+### Prerequisites
 
 - Node.js 24
 - Git
-- A local copy of this repository
-
-Clone the repository:
 
 ```bash
 git clone https://github.com/yusufthecoder474/RevenueGuard-AWS.git
 cd RevenueGuard-AWS
-```
-
-Check the Lambda source syntax:
-
-```bash
 node --check source/index.mjs
-```
-
-Run the complete Node.js test suite:
-
-```bash
 node --test test_local.mjs test_security.mjs test_phase3.mjs
 ```
 
-### Previously verified local results
+Previously verified local results:
 
-- 11 original business-validation scenarios passed.
-- 15 Phase 2 security regression tests passed.
-- 14 Phase 3 HTTP security tests passed.
-- 30/30 tests reported by the combined Node.js test runner.
+| Suite | Result |
+|---|---:|
+| Original business-validation scenarios | 11 passed |
+| Phase 2 security regression tests | 15 passed |
+| Phase 3 HTTP security regression tests | 14 passed |
+| Combined Node.js test-runner report | **30/30 passed** |
 
-**Test-count note:** The original 11 business-validation scenarios execute within one Node.js test-runner test, so the combined runner reports 30 tests rather than 40.
+The 11 original scenarios are executed within one Node.js test-runner test, so the combined runner reports 30 tests rather than the arithmetic sum of all scenario counts.
 
 ## Continuous integration and packaging
 
-The repository contains two GitHub Actions workflows.
+Two workflows run from `.github/workflows/`:
 
-### Continuous integration
+- **`ci.yml` — RevenueGuard Lambda CI:** Runs syntax validation and the three local test suites on pushes and pull requests. It requires no AWS credentials.
+- **`package.yml` — RevenueGuard Lambda Package:** Runs syntax checks and the combined regression suite, packages `source/index.mjs` as `index.mjs` at the ZIP root, verifies ZIP contents and syntax, and uploads a downloadable GitHub Actions artifact.
 
-**File:** `.github/workflows/ci.yml`
+The packaging workflow previously succeeded at commit `5a22992` and produced a Lambda deployment artifact. A subsequent documentation commit `34fb93a` passed the CI workflow. These are separate workflow results; the ZIP packaging workflow does **not** automatically deploy to AWS.
 
-Runs automated validation without requiring AWS credentials.
-
-### Lambda deployment packaging
-
-**File:** `.github/workflows/package.yml`
-
-Automates the following operations:
-
-1. Runs automated tests.
-2. Packages the Lambda handler into a ZIP file.
-3. Checks the ZIP archive contents.
-4. Verifies the packaged JavaScript syntax.
-5. Uploads a downloadable deployment artifact to GitHub Actions.
-
-The packaging workflow successfully completed on commit `5a22992`, producing a downloadable Lambda deployment artifact.
-
-**Security:** AWS access keys are not stored in the repository, and the packaging workflow does not automatically deploy to AWS.
+**Artifact layout:** The downloaded GitHub Actions artifact is an outer archive named like `revenueguard-lambda-<commit>.zip`. Extract it first to obtain the inner **`revenueguard-lambda.zip`** deployment package. Upload the inner ZIP to Lambda, not the outer artifact archive.
 
 ## AWS deployment
 
-### Verified deployment configuration
+### Verified environment
 
-| Configuration | Value |
+| Setting | Value |
 |---|---|
-| Cloud platform | AWS Lambda |
-| Function name | `revenueguard-validation-api` |
-| Runtime | Node.js 24 |
+| AWS service | Lambda |
+| Function | `revenueguard-validation-api` |
 | Region | `ap-southeast-2` |
+| Runtime | `nodejs24.x` |
 | Handler | `index.handler` |
-| Function URL authentication | `AWS_IAM` |
-| Deployment package | ZIP archive |
+| Package type | ZIP |
+| Function URL authorization | `AWS_IAM` |
 
-### Deployment procedure
+### Deploy an already packaged ZIP
 
-1. Open the repository's **Actions** tab.
-2. Select the **RevenueGuard Lambda Package** workflow.
-3. Open a successful workflow run.
-4. Download the Lambda deployment artifact.
-5. Extract the downloaded GitHub Actions artifact ZIP.
-6. Locate the inner `revenueguard-lambda.zip` package.
-7. Upload the inner deployment ZIP to AWS CloudShell.
-8. Deploy the ZIP to the existing Lambda function.
-9. Wait for the Lambda update to complete.
-10. Verify the deployed function and run a smoke test.
-
-Example AWS CLI deployment:
+1. Open **GitHub → Actions → RevenueGuard Lambda Package** and choose a successful run.
+2. Download the `revenueguard-lambda-<commit>` artifact.
+3. Extract the downloaded artifact and locate its inner `revenueguard-lambda.zip`.
+4. Upload the inner ZIP to **AWS CloudShell in `ap-southeast-2`**.
+5. Run the commands below, substituting the actual ZIP path.
 
 ```bash
 aws lambda update-function-code \
   --function-name revenueguard-validation-api \
   --region ap-southeast-2 \
   --zip-file fileb://revenueguard-lambda.zip
-```
 
-The command assumes the deployment ZIP is in the current directory. Otherwise, provide its full path.
-
-Wait for the update:
-
-```bash
 aws lambda wait function-updated \
   --function-name revenueguard-validation-api \
   --region ap-southeast-2
-```
 
-Verify the deployment:
-
-```bash
 aws lambda get-function-configuration \
   --function-name revenueguard-validation-api \
   --region ap-southeast-2 \
-  --query '{State:State,UpdateStatus:LastUpdateStatus}' \
+  --query '{State:State,UpdateStatus:LastUpdateStatus,Runtime:Runtime}' \
   --output json
 ```
 
-Expected successful configuration:
+The example assumes the inner ZIP is in the current CloudShell directory. Otherwise, use its absolute path after `fileb://`.
 
-```json
-{
-  "State": "Active",
-  "UpdateStatus": "Successful"
-}
-```
+A successful update should report `State: Active` and `UpdateStatus: Successful`. A successful update does not, by itself, prove the deployed behavior; run post-deployment regression tests as well.
 
-### Authentication
+### Access control
 
-The Lambda Function URL uses `AWS_IAM` authentication.
+The Lambda Function URL is configured with **`AWS_IAM`** authorization. HTTPS clients must sign requests using AWS Signature Version 4 and possess the required Lambda Function URL invocation permissions. Direct AWS SDK invocation requires the relevant Lambda invoke permission. Keep permissions least-privileged, avoid committing credentials, and configure billing safeguards.
 
-External HTTPS requests must be signed with AWS Signature Version 4 using credentials with the appropriate Lambda invocation permissions.
+**Do not switch the Function URL to public `NONE` authentication to simplify testing.**
 
-**Do not change the Function URL authentication to public `NONE` merely to simplify testing.**
+## Verification evidence — 31 October 2026
 
-Use least-privilege IAM policies and configure AWS billing safeguards.
+### Post-deployment Phase 8 regression results
 
-## Verification results
+The latest packaged Lambda deployment was followed by the checks below:
 
-### Local automated testing
+| Verification | Observed result |
+|---|---|
+| Lambda state | `Active` |
+| Last update status | `Successful` |
+| Function URL authorization | `AWS_IAM` retained |
+| Unsupported GET smoke test | Application HTTP 405; direct Lambda invocation successful |
+| HTTP event security regression | **5/5 passed** |
+| Financial business-rule regression via Lambda SDK | **5/5 passed** |
+| Financial business-rule regression via SigV4 HTTPS | **5/5 passed** |
 
-| Test category | Verified result |
-|---|---:|
-| Original business-validation scenarios | 11 passed |
-| Phase 2 security tests | 15 passed |
-| Phase 3 HTTP security tests | 14 passed |
-| Combined Node.js test runner | 30/30 passed |
+The five HTTP event security checks covered GET, PUT, DELETE, malformed JSON, and an oversized body. The financial regression checks covered correct gross sales, incorrect gross sales, correct refunds, correct net sales, and incorrect net sales. The HTTPS tests returned HTTP 200 with the expected `ACCEPTED` or `REJECTED` application verdict and checked the per-claim reason.
 
-### Live AWS Lambda verification
+**Scope:** These are limited functional and security regression checks against the deployed demo, not a load test or proof of production readiness. The two sets of five financial tests use different invocation paths; they are not ten distinct financial scenarios.
 
-During the initial deployment:
+### Earlier live deployment checks
 
-- 5/5 direct AWS Lambda invocation tests passed.
-- 5/5 authenticated HTTPS Function URL tests passed.
-- Verified valid claims, incorrect claims, unsupported HTTP methods, malformed JSON, and oversized requests.
+Before the latest packaged deployment, an earlier live verification also reported:
 
-Following the later packaged deployment:
+- **5/5** direct Lambda invocation tests passed.
+- **5/5** IAM-authenticated HTTPS Function URL tests passed.
 
-- Lambda reported `State: Active`.
-- Lambda reported `LastUpdateStatus: Successful`.
-- The Function URL retained `AWS_IAM` authentication.
-- A post-deployment GET-request smoke test passed.
-- The AWS Lambda invocation returned status code 200 with no function error.
-- The application correctly returned HTTP 405 for the unsupported GET request.
+Those earlier runs covered valid claims, incorrect claims, unsupported HTTP methods, malformed JSON, and oversized requests. They are historical evidence, not additional Phase 8 executions.
 
-The complete live regression suites have not yet been rerun following the packaged deployment.
+### CloudWatch observability
 
-### AWS CloudWatch observability
+The Lambda function was inspected in Amazon CloudWatch in `ap-southeast-2`.
 
-The deployed Lambda function was inspected using Amazon CloudWatch in `ap-southeast-2`.
+**Selected three-hour monitoring window (historical observation):**
 
-**Observed Lambda metrics from a selected three-hour monitoring window:**
-
-| Metric | Observed value |
+| Metric | Displayed observation |
 |---|---:|
 | Invocations | 11 |
 | Lambda execution errors (maximum displayed) | 0 |
 | Throttles (maximum displayed) | 0 |
 | Average duration displayed | 21.85 ms |
 
-**Verified execution log from one invocation:**
+**One inspected `REPORT` log event:**
 
 | Metric | Observed value |
 |---|---:|
@@ -266,24 +230,11 @@ The deployed Lambda function was inspected using Amazon CloudWatch in `ap-southe
 | Initialization duration | 118.23 ms |
 | Configured memory | 128 MB |
 | Maximum memory used | 76 MB |
-| Approximate memory utilization | 59.4% |
+| Maximum memory / configured memory | Approximately 59.4% |
 
-**CloudWatch log group:**
+**Log group:** `/aws/lambda/revenueguard-validation-api`
 
-```text
-/aws/lambda/revenueguard-validation-api
-```
-
-Observed log records included:
-
-- `INIT_START`
-- `START`
-- `END`
-- `REPORT`
-
-These measurements represent a limited demonstration workload. They are not load-test results, production latency guarantees, or an availability SLA.
-
-No custom monitoring dashboard or paid advanced observability feature was required for this verification.
+CloudWatch log records included `INIT_START`, `START`, `END`, and `REPORT`. These values describe a limited demonstration workload and a selected log event. They are not p95 latency, sustained throughput, production performance targets, or an availability SLA. No custom paid monitoring dashboard was required for this observation.
 
 ## Project structure
 
@@ -304,43 +255,30 @@ RevenueGuard-AWS/
 └── README.md
 ```
 
-### File descriptions
-
 | File | Purpose |
 |---|---|
-| `source/index.mjs` | AWS Lambda financial claim validation handler |
-| `test_local.mjs` | Local business-validation regression tests |
+| `source/index.mjs` | Lambda handler and financial validation rules |
+| `test_local.mjs` | Original business-validation scenarios |
 | `test_security.mjs` | Phase 2 security and boundary regression tests |
-| `test_phase3.mjs` | Phase 3 HTTP security and request validation tests |
-| `test_revenueguard.py` | AWS Lambda business-rule integration tests |
-| `test_revenueguard_http.py` | AWS Lambda HTTP event integration tests |
-| `.github/workflows/ci.yml` | Credential-free automated CI checks |
+| `test_phase3.mjs` | Phase 3 HTTP and request security tests |
+| `test_revenueguard.py` | AWS Lambda business-rule integration test script |
+| `test_revenueguard_http.py` | AWS Lambda HTTP event integration test script |
+| `.github/workflows/ci.yml` | Credential-free CI checks |
 | `.github/workflows/package.yml` | Automated Lambda ZIP packaging, verification, and downloadable GitHub Actions artifact |
 | `README.md` | Project documentation |
 
+The Python integration scripts require `boto3`, AWS credentials, and appropriate permissions; they are **not** part of the default credential-free GitHub Actions workflows. The Phase 8 live checks were also executed manually through AWS CloudShell.
+
 ## Security considerations
 
-The application includes:
+**Implemented in this demo:** IAM-authenticated HTTPS access, POST-only HTTP handling, input structure checks, a 16 KiB HTTP body limit, Base64/UTF-8 validation, integer-cent arithmetic, and automated security regression tests.
 
-- IAM-authenticated HTTPS access.
-- POST-only HTTP handling.
-- Strict request validation.
-- Request size restrictions.
-- Integer-cent financial arithmetic.
-- Automated security regression tests.
+**Not established as production-ready:** Authorized access to real financial source systems, data governance, rate limiting, comprehensive application monitoring and alerting, a formal threat model, production load testing, and availability guarantees. Never commit AWS access keys, secret keys, or session credentials to GitHub.
 
-Production readiness would additionally require authenticated and authorized access to real source data, structured application monitoring, rate limiting, comprehensive error handling, data governance, and a documented threat model.
+## Cost and operational limitations
 
-**Never commit AWS access keys, secret keys, or temporary session credentials to GitHub.**
-
-## Limitations
-
-This project uses synthetic, hard-coded financial transactions and does not access production customer data.
-
-Basic AWS CloudWatch metrics and execution logs have been verified. Production-grade monitoring, alerting, load testing, and availability SLAs have not been established.
-
-The Python AWS integration tests require configured AWS credentials, boto3, and appropriate Lambda permissions. They are not part of the default credential-free GitHub Actions workflow.
+This project uses synthetic data only. AWS Lambda and CloudWatch usage can incur charges depending on account allowances and consumption; review AWS Billing and set appropriate account spending controls. The repository's CI and ZIP packaging do not need AWS credentials and do not automatically create or update AWS resources.
 
 ## License
 
-No license has been selected. Add a `LICENSE` file after choosing the terms under which the source code may be reused or distributed.
+No license has been selected. Add a `LICENSE` file only after choosing the terms under which others may reuse or redistribute this code.
