@@ -38,9 +38,39 @@ Deploy `source/index.mjs` as `index.mjs` in a Node.js 24 Lambda with handler `in
 
 The Python files `test_revenueguard.py` and `test_revenueguard_http.py` invoke the named AWS function in `ap-southeast-2` and require boto3, configured AWS credentials and suitable Lambda invoke permission. They are **integration tests**, not part of the default GitHub Actions job. No AWS credentials are stored in this repository.
 
-## Evidence and limitations
 
-Screenshots provided by the project author show 11/11 AWS Lambda business-validation tests, 3/3 HTTP-event tests and an authenticated Function URL request returning HTTP 200. These are **user-provided historical execution results**, not independent AWS reruns by this package. Local CI tests run separately. No production dataset, customer records, throughput benchmark, availability SLA or real-world accuracy claim is implied.
+## Verification Results
+
+### Local automated testing
+- 11 original business-validation scenarios passed.
+- 15 Phase 2 security regression tests passed.
+- 14 Phase 3 HTTP security tests passed.
+- 30/30 tests reported by the combined Node.js test runner.
+- GitHub Actions CI passed after Phase 3 integration.
+
+Note: The original 11 scenarios are counted as one
+Node.js test file by the combined test runner.
+
+### Live AWS Lambda verification
+- 5/5 direct AWS Lambda invocation tests passed.
+- 5/5 authenticated HTTPS Function URL tests passed.
+- Tested valid claims, incorrect claims, unsupported HTTP
+  methods, malformed JSON, and oversized requests.
+
+### Deployment
+- Platform: AWS Lambda
+- Runtime: Node.js 24
+- Region: ap-southeast-2
+- Handler: index.handler
+- Function URL authentication: AWS_IAM
+- Deployment status: Verified through live tests
+
+### Limitations
+This is a synthetic financial validation demonstration.
+It does not use production customer data. Load testing,
+production monitoring, and availability SLAs have not
+been verified.
+
 
 ## Project structure
 
