@@ -5,7 +5,9 @@ const demoTransactions = [
   { id: "REF-103", type: "refund", amount: "125.00" }
 ];
 
-// Convert decimal strings to integer cents without floating-point errors.
+const MAX_BODY_BYTES = 16 * 1024;
+
+// Convert decimal strings into integer cents.
 function toCents(value) {
   if (
     typeof value !== "string" ||
@@ -16,8 +18,10 @@ function toCents(value) {
 
   const [whole, fraction = ""] = value.split(".");
 
-  return BigInt(whole) * 100n +
-    BigInt(fraction.padEnd(2, "0"));
+  return (
+    BigInt(whole) * 100n +
+    BigInt(fraction.padEnd(2, "0"))
+  );
 }
 
 function fromCents(cents) {
@@ -29,7 +33,7 @@ function fromCents(cents) {
   return `${whole}.${fraction}`;
 }
 
-// Calculate trusted financial facts from synthetic transactions.
+// Trusted calculations from synthetic transactions.
 function calculateFacts() {
   const total = (type) =>
     demoTransactions
@@ -44,51 +48,145 @@ function calculateFacts() {
 
   return {
     gross_sales: gross,
-    refunds: refunds,
+    refunds,
     net_sales: gross - refunds
   };
 }
 
-function respond(statusCode, result) {
+// Standard Lambda HTTP response.
+function respond(statusCode, result, extraHeaders = {}) {
   return {
     statusCode,
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
+      ...extraHeaders
     },
     body: JSON.stringify(result)
   };
 }
 
+function reject(statusCode, reason, headers = {}) {
+  return respond(
+    statusCode,
+    { status: "REJECTED", reason },
+    headers
+  );
+}
+
+// Validate HTTP request boundaries.
+function validateHttpRequest(event) {
+  if (!event || typeof event !== "object") {
+    return null;
+  }
+
+  const method = event.requestContext?.http?.method;
+
+  if (method !== undefined && method !== "POST") {
+    return {
+      statusCode: 405,
+      reason: "Only POST requests are allowed",
+      headers: { Allow: "POST" }
+    };
+  }
+
+  if (event.body === undefined) {
+    return null;
+  }
+
+  if (typeof event.body !== "string") {
+    return {
+      statusCode: 400,
+      reason: "Invalid HTTP request body"
+    };
+  }
+
+  let bodyBytes;
+
+  if (event.isBase64Encoded === true) {
+    const validBase64 =
+      /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+    if (!validBase64.test(event.body)) {
+      return {
+        statusCode: 400,
+        reason: "Invalid Base64 body"
+      };
+    }
+
+    bodyBytes = Buffer.from(event.body, "base64");
+
+    if (bodyBytes.toString("base64") !== event.body) {
+      return {
+        statusCode: 400,
+        reason: "Invalid Base64 body"
+      };
+    }
+  } else {
+    bodyBytes = Buffer.from(event.body, "utf8");
+  }
+
+  if (bodyBytes.length > MAX_BODY_BYTES) {
+    return {
+      statusCode: 413,
+      reason: "Request body exceeds 16 KB"
+    };
+  }
+
+  try {
+    new TextDecoder("utf-8", { fatal: true })
+      .decode(bodyBytes);
+  } catch {
+    return {
+      statusCode: 400,
+      reason: "Invalid UTF-8 body"
+    };
+  }
+
+  return null;
+}
+
+// AWS Lambda entry point.
 export const handler = async (event) => {
+  const requestError = validateHttpRequest(event);
+
+  if (requestError) {
+    return reject(
+      requestError.statusCode,
+      requestError.reason,
+      requestError.headers
+    );
+  }
+
   let input;
 
-  // Support both Lambda console tests and HTTP Function URLs.
+  // Support Lambda console and HTTP Function URL events.
   try {
     if (typeof event?.body === "string") {
-      input = JSON.parse(event.body);
+      const rawBody = event.isBase64Encoded === true
+        ? Buffer.from(event.body, "base64").toString("utf8")
+        : event.body;
+
+      input = JSON.parse(rawBody);
     } else if (event?.body !== undefined) {
       input = event.body;
     } else {
       input = event;
     }
   } catch {
-    return respond(400, {
-      status: "REJECTED",
-      reason: "Invalid JSON body"
-    });
+    return reject(400, "Invalid JSON body");
   }
 
-  // Validate the incoming request.
+  // Validate claim count and structure.
   if (
     !input ||
     !Array.isArray(input.claims) ||
     input.claims.length < 1 ||
     input.claims.length > 20
   ) {
-    return respond(400, {
-      status: "REJECTED",
-      reason: "Provide between 1 and 20 claims."
-    });
+    return reject(
+      400,
+      "Provide between 1 and 20 claims."
+    );
   }
 
   const facts = calculateFacts();
