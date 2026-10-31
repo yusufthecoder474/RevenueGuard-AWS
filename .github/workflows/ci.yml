@@ -23,3 +23,6 @@ jobs:
 
       - name: Run Phase 2 security tests
         run: node --test test_security.mjs
+
+      - name: Run Phase 3 HTTP security tests
+        run: node --test test_phase3.mjs
