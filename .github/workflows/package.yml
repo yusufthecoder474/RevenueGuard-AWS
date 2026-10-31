@@ -1,0 +1,57 @@
+
+name: RevenueGuard Lambda Package
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Test and package Lambda
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Validate Lambda syntax
+        run: node --check source/index.mjs
+
+      - name: Run regression tests
+        run: |
+          node --test \
+            test_local.mjs \
+            test_security.mjs \
+            test_phase3.mjs
+
+      - name: Build Lambda ZIP
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp source/index.mjs dist/index.mjs
+          cd dist
+          zip ../revenueguard-lambda.zip index.mjs
+
+      - name: Verify ZIP contents
+        run: |
+          unzip -l revenueguard-lambda.zip
+          unzip -p revenueguard-lambda.zip index.mjs > /tmp/index.mjs
+          node --check /tmp/index.mjs
+
+      - name: Upload deployment artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: revenueguard-lambda-${{ github.sha }}
+          path: revenueguard-lambda.zip
+          if-no-files-found: error
+          retention-days: 7
