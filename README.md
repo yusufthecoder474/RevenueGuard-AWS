@@ -282,3 +282,41 @@ This project uses synthetic data only. AWS Lambda and CloudWatch usage can incur
 ## License
 
 No license has been selected. Add a `LICENSE` file only after choosing the terms under which others may reuse or redistribute this code.
+
+## GitHub Actions Upgrade Verification — 31 October 2026
+
+The GitHub Actions workflows were upgraded to Node.js 24-compatible action versions through pull request #1.
+
+### Verified results
+
+| Item | Result |
+|---|---|
+| Pull request | #1 — MERGED |
+| Merge commit | `262a1cbbdc1b86fdf42430026db85081b8d83cd6` |
+| CI workflow | SUCCESS |
+| CI run ID | `41219909447` |
+| Lambda packaging workflow | SUCCESS |
+| Packaging run ID | `41219909413` |
+
+### GitHub Actions versions
+
+- `actions/checkout@v5`
+- `actions/setup-node@v5`
+- `actions/upload-artifact@v5`
+
+The upgrade preserves the AWS Lambda application, existing regression tests, IAM authentication, and ZIP packaging behavior.
+
+The CI workflow performs JavaScript syntax validation and automated regression testing.
+
+The packaging workflow tests the application, creates the Lambda ZIP, verifies its contents, and uploads the deployment artifact.
+
+Both workflows completed successfully on the `main` branch after the upgrade.
+
+### Verification links
+
+- [Merged upgrade PR](https://github.com/yusufthecoder474/RevenueGuard-AWS/pull/1)
+- [Successful CI run](https://github.com/yusufthecoder474/RevenueGuard-AWS/actions/runs/41219909447)
+- [Successful packaging run](https://github.com/yusufthecoder474/RevenueGuard-AWS/actions/runs/41219909413)
+
+**Deployment note:** The packaging workflow produces a deployment artifact but does not automatically deploy to AWS. The existing Lambda deployment remains separate.
+
